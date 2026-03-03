@@ -1,6 +1,5 @@
 # ============================================================
 # 🥭 FARMER’S MANGO PROFIT NAVIGATOR 🥭
-# Find the Best Market. Earn the Highest Return.
 # ============================================================
 
 import streamlit as st
@@ -120,14 +119,18 @@ if st.session_state.run:
 
     st.markdown(f"## 🙏🥭 Namaste **{farmer_name}** 🥭")
 
-    st.subheader("🧠 Alternative Selection Logic")
-    st.markdown(f"""
-**Step 1:** Filter categories that accept {variety}  
-**Step 2:** Calculate distance using Haversine formula  
-**Step 3:** Transport Cost = Distance × ₹200 × Quantity  
-**Step 4:** Revenue = Base Price × (1 + Margin) × 100 × Quantity  
-**Step 5:** Net Profit = Revenue − Transport Cost  
-**Step 6:** Select Top 10 by highest Net Profit
+    st.subheader("🧠 Transport Cost Logic")
+
+    st.markdown("""
+**Transport Rule Used:**
+
+🚛 1 Quintal → 10 KM → ₹2000  
+
+So,
+
+₹2000 / 10 KM = ₹200 per KM per Quintal  
+
+**Transport Cost = Distance × 200 × Quantity**
 """)
 
     village_row = villages[villages[detect_name(villages)]==selected_village].iloc[0]
@@ -164,7 +167,7 @@ if st.session_state.run:
             if pd.notnull(row[lat]) and pd.notnull(row[lon]):
 
                 dist = haversine(v_lat,v_lon,row[lat],row[lon])
-                transport = dist * 200 * quantity_qtl   # UPDATED RULE
+                transport = dist * 200 * quantity_qtl
                 revenue = base_price*(1+margin_map[cat])*100*quantity_qtl
                 net = revenue - transport
 
@@ -185,28 +188,41 @@ if st.session_state.run:
 
     df_top10["Rank"]=df_top10.index+1
 
-    # ---------------- CHARTS ----------------
+    # ---------------- CHARTS & TABLE SAME ----------------
     st.subheader("📊🥭 Profit Comparison")
     fig = go.Figure()
     fig.add_trace(go.Bar(
         y=df_top10["Name"],
         x=df_top10["Net Profit"],
-        orientation='h',
-        text=[f"₹{x:,.0f}" for x in df_top10["Net Profit"]],
-        textposition="outside",
-        marker=dict(color=df_top10["Net Profit"], colorscale="Turbo")
+        orientation='h'
     ))
-    fig.update_layout(height=700, yaxis=dict(autorange="reversed"))
+    fig.update_layout(height=600, yaxis=dict(autorange="reversed"))
     st.plotly_chart(fig, use_container_width=True)
 
-    st.subheader("🥭 Category-wise Profit Distribution")
-    pie_data = df_top10.groupby("Category")["Net Profit"].sum().reset_index()
-    pie_fig = px.pie(pie_data, names="Category", values="Net Profit", hole=0.4)
-    st.plotly_chart(pie_fig, use_container_width=True)
+    st.subheader("📋 Detailed Comparison")
+    st.dataframe(df_top10)
 
-    st.subheader("📋🥭 Detailed Comparison Table")
-    st.dataframe(df_top10[[
-        "Rank","Name","Category",
-        "Distance_km","Revenue",
-        "Transport Cost","Net Profit"
-    ]])
+    # ---------------- MAP FILTERED ----------------
+    st.subheader("🗺 Selected Alternatives Map")
+
+    m = folium.Map(location=[v_lat, v_lon], zoom_start=9)
+
+    # Village
+    folium.Marker(
+        [v_lat, v_lon],
+        popup="Village",
+        icon=folium.Icon(color="black")
+    ).add_to(m)
+
+    allowed_map_categories = ["Pickle","Pulp","Local Export","Abroad Export"]
+
+    for _,row in df_top10.iterrows():
+        if row["Category"] in allowed_map_categories:
+
+            folium.Marker(
+                [row["Lat"],row["Lon"]],
+                popup=f"{row['Name']} ({row['Category']})",
+                icon=folium.Icon(color="green")
+            ).add_to(m)
+
+    st_folium(m, use_container_width=True, height=600)
