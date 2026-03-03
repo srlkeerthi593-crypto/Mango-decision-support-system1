@@ -124,23 +124,12 @@ if st.session_state.run:
     st.subheader("🧠 Alternative Selection Logic")
 
     st.markdown(f"""
-### Step 1️⃣ Variety Filtering  
-Only categories that accept **{variety}** are considered.
-
-### Step 2️⃣ Distance Calculation  
-Distance from selected village to each alternative is calculated using Haversine formula (km).
-
-### Step 3️⃣ Transport Cost  
-Transport Cost = Distance × ₹12 × Quantity (Quintals)
-
-### Step 4️⃣ Revenue  
-Revenue = Base Mandi Price × (1 + Category Margin) × 100 × Quantity
-
-### Step 5️⃣ Net Profit  
-Net Profit = Revenue − Transport Cost
-
-### Step 6️⃣ Final Selection  
-Top 10 alternatives selected based on highest Net Profit.
+**Step 1:** Filter categories that accept {variety}  
+**Step 2:** Calculate distance using Haversine formula  
+**Step 3:** Transport Cost = Distance × ₹12 × Quantity  
+**Step 4:** Revenue = Base Price × (1 + Margin) × 100 × Quantity  
+**Step 5:** Net Profit = Revenue − Transport Cost  
+**Step 6:** Select Top 10 by highest Net Profit
 """)
 
     accepted_categories = [
@@ -215,13 +204,10 @@ Top 10 alternatives selected based on highest Net Profit.
         orientation='h',
         text=[f"₹{x:,.0f}" for x in df_top10["Net Profit"]],
         textposition="outside",
-        marker=dict(
-            color=df_top10["Net Profit"],
-            colorscale="Turbo"
-        )
+        marker=dict(color=df_top10["Net Profit"], colorscale="Turbo")
     ))
     fig.update_layout(height=700, yaxis=dict(autorange="reversed"))
-    st.plotly_chart(fig, width="stretch")
+    st.plotly_chart(fig, use_container_width=True)
 
     # ---------------- PIE ----------------
     st.subheader("🥭 Category-wise Profit Distribution")
@@ -235,7 +221,7 @@ Top 10 alternatives selected based on highest Net Profit.
         color_discrete_sequence=px.colors.sequential.Turbo
     )
     pie_fig.update_traces(textinfo="percent+label")
-    st.plotly_chart(pie_fig, width="stretch")
+    st.plotly_chart(pie_fig, use_container_width=True)
 
     # ---------------- TABLE ----------------
     st.subheader("📋🥭 Detailed Comparison Table")
@@ -245,14 +231,22 @@ Top 10 alternatives selected based on highest Net Profit.
         "Transport Cost","Net Profit"
     ]])
 
-    # ---------------- MAP ----------------
+    # ---------------- PROFESSIONAL MAP ----------------
     st.subheader("🗺🥭 Top 10 Alternatives with Road Routes")
 
-    m = folium.Map(location=[v_lat,v_lon],zoom_start=9)
+    m = folium.Map(
+        location=[v_lat, v_lon],
+        zoom_start=9,
+        tiles="OpenStreetMap",
+        control_scale=True
+    )
 
-    folium.Marker([v_lat,v_lon],
-                  popup="🏡 Village",
-                  icon=folium.Icon(color="black")).add_to(m)
+    folium.Marker(
+        [v_lat, v_lon],
+        popup="🏡 Village",
+        tooltip="Village",
+        icon=folium.Icon(color="black", icon="home", prefix="fa")
+    ).add_to(m)
 
     color_map = {
         "Mandi": "blue",
@@ -269,8 +263,9 @@ Top 10 alternatives selected based on highest Net Profit.
 
         folium.Marker(
             [row["Lat"],row["Lon"]],
-            popup=f"🥭 {row['Name']} ({row['Category']})",
-            icon=folium.Icon(color=marker_color)
+            popup=f"<b>{row['Name']}</b><br>Category: {row['Category']}<br>Net Profit: ₹{row['Net Profit']:,}",
+            tooltip=row["Name"],
+            icon=folium.Icon(color=marker_color, icon="info-sign")
         ).add_to(m)
 
         road_path = get_road_route(v_lat, v_lon, row["Lat"], row["Lon"])
@@ -279,7 +274,8 @@ Top 10 alternatives selected based on highest Net Profit.
             folium.PolyLine(
                 road_path,
                 color="orange",
-                weight=4
+                weight=4,
+                opacity=0.8
             ).add_to(m)
 
-    st_folium(m,width=1100,height=600)
+    st_folium(m, use_container_width=True, height=650)
