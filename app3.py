@@ -120,25 +120,16 @@ if st.session_state.run:
 
     st.markdown(f"## 🙏🥭 Namaste **{farmer_name}** 🥭")
 
-    # ---------------- LOGIC DISPLAY ----------------
     st.subheader("🧠 Alternative Selection Logic")
-
     st.markdown(f"""
 **Step 1:** Filter categories that accept {variety}  
 **Step 2:** Calculate distance using Haversine formula  
-**Step 3:** Transport Cost = Distance × ₹12 × Quantity  
+**Step 3:** Transport Cost = Distance × ₹200 × Quantity  
 **Step 4:** Revenue = Base Price × (1 + Margin) × 100 × Quantity  
 **Step 5:** Net Profit = Revenue − Transport Cost  
 **Step 6:** Select Top 10 by highest Net Profit
 """)
 
-    accepted_categories = [
-        cat for cat, varieties in variety_acceptance.items()
-        if variety in varieties
-    ]
-    st.write("✅ Categories Accepting This Variety:", accepted_categories)
-
-    # ---------------- DATA PROCESSING ----------------
     village_row = villages[villages[detect_name(villages)]==selected_village].iloc[0]
     v_lat, v_lon = village_row[detect_lat_lon(villages)[0]], village_row[detect_lat_lon(villages)[1]]
 
@@ -173,7 +164,7 @@ if st.session_state.run:
             if pd.notnull(row[lat]) and pd.notnull(row[lon]):
 
                 dist = haversine(v_lat,v_lon,row[lat],row[lon])
-                transport = dist * 12 * quantity_qtl
+                transport = dist * 200 * quantity_qtl   # UPDATED RULE
                 revenue = base_price*(1+margin_map[cat])*100*quantity_qtl
                 net = revenue - transport
 
@@ -194,9 +185,8 @@ if st.session_state.run:
 
     df_top10["Rank"]=df_top10.index+1
 
-    # ---------------- BAR CHART ----------------
+    # ---------------- CHARTS ----------------
     st.subheader("📊🥭 Profit Comparison")
-
     fig = go.Figure()
     fig.add_trace(go.Bar(
         y=df_top10["Name"],
@@ -209,73 +199,14 @@ if st.session_state.run:
     fig.update_layout(height=700, yaxis=dict(autorange="reversed"))
     st.plotly_chart(fig, use_container_width=True)
 
-    # ---------------- PIE ----------------
     st.subheader("🥭 Category-wise Profit Distribution")
     pie_data = df_top10.groupby("Category")["Net Profit"].sum().reset_index()
-
-    pie_fig = px.pie(
-        pie_data,
-        names="Category",
-        values="Net Profit",
-        hole=0.4,
-        color_discrete_sequence=px.colors.sequential.Turbo
-    )
-    pie_fig.update_traces(textinfo="percent+label")
+    pie_fig = px.pie(pie_data, names="Category", values="Net Profit", hole=0.4)
     st.plotly_chart(pie_fig, use_container_width=True)
 
-    # ---------------- TABLE ----------------
     st.subheader("📋🥭 Detailed Comparison Table")
     st.dataframe(df_top10[[
         "Rank","Name","Category",
         "Distance_km","Revenue",
         "Transport Cost","Net Profit"
     ]])
-
-    # ---------------- PROFESSIONAL MAP ----------------
-    st.subheader("🗺🥭 Top 10 Alternatives with Road Routes")
-
-    m = folium.Map(
-        location=[v_lat, v_lon],
-        zoom_start=9,
-        tiles="OpenStreetMap",
-        control_scale=True
-    )
-
-    folium.Marker(
-        [v_lat, v_lon],
-        popup="🏡 Village",
-        tooltip="Village",
-        icon=folium.Icon(color="black", icon="home", prefix="fa")
-    ).add_to(m)
-
-    color_map = {
-        "Mandi": "blue",
-        "Processing": "red",
-        "Pulp": "purple",
-        "Pickle": "orange",
-        "Local Export": "green",
-        "Abroad Export": "darkred"
-    }
-
-    for _,row in df_top10.iterrows():
-
-        marker_color = color_map.get(row["Category"], "gray")
-
-        folium.Marker(
-            [row["Lat"],row["Lon"]],
-            popup=f"<b>{row['Name']}</b><br>Category: {row['Category']}<br>Net Profit: ₹{row['Net Profit']:,}",
-            tooltip=row["Name"],
-            icon=folium.Icon(color=marker_color, icon="info-sign")
-        ).add_to(m)
-
-        road_path = get_road_route(v_lat, v_lon, row["Lat"], row["Lon"])
-
-        if road_path:
-            folium.PolyLine(
-                road_path,
-                color="orange",
-                weight=4,
-                opacity=0.8
-            ).add_to(m)
-
-    st_folium(m, use_container_width=True, height=650)
