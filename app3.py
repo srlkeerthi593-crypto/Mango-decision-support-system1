@@ -1,5 +1,6 @@
 # ============================================================
 # 🥭 FARMER’S MANGO PROFIT NAVIGATOR 🥭
+# Find the Best Market. Earn the Highest Return.
 # ============================================================
 
 import streamlit as st
@@ -51,26 +52,31 @@ def detect_name(df):
             return col
     return df.columns[0]
 
-def haversine(lat1, lon1, lat2, lon2):
-    R = 6371
-    lat1, lon1, lat2, lon2 = map(np.radians,[lat1, lon1, lat2, lon2])
-    dlat = lat2 - lat1
-    dlon = lon2 - lon1
-    a = np.sin(dlat/2)**2 + np.cos(lat1)*np.cos(lat2)*np.sin(dlon/2)**2
-    return R * 2*np.arcsin(np.sqrt(a))
-
-# ---------------- ROAD ROUTING ----------------
+# ----------- OSM ROAD ROUTING FUNCTION (UPDATED) -----------
 def get_road_route(lat1, lon1, lat2, lon2):
+
     url = f"http://router.project-osrm.org/route/v1/driving/{lon1},{lat1};{lon2},{lat2}?overview=full&geometries=geojson"
+    
     try:
         response = requests.get(url)
         data = response.json()
+
         if "routes" in data:
-            route = data["routes"][0]["geometry"]["coordinates"]
-            return [(coord[1], coord[0]) for coord in route]
+            route = data["routes"][0]
+
+            # road distance in km
+            distance_km = route["distance"] / 1000
+
+            coordinates = route["geometry"]["coordinates"]
+            path = [(coord[1], coord[0]) for coord in coordinates]
+
+            return distance_km, path
+
     except:
-        return None
-    return None
+        return None, None
+
+    return None, None
+
 
 # ---------------- SIDEBAR ----------------
 st.sidebar.header("👨‍🌾 Farmer Details 🥭")
@@ -119,20 +125,6 @@ if st.session_state.run:
 
     st.markdown(f"## 🙏🥭 Namaste **{farmer_name}** 🥭")
 
-    st.subheader("🧠 Transport Cost Logic")
-
-    st.markdown("""
-**Transport Rule Used:**
-
-🚛 1 Quintal → 10 KM → ₹2000  
-
-So,
-
-₹2000 / 10 KM = ₹200 per KM per Quintal  
-
-**Transport Cost = Distance × 200 × Quantity**
-""")
-
     village_row = villages[villages[detect_name(villages)]==selected_village].iloc[0]
     v_lat, v_lon = village_row[detect_lat_lon(villages)[0]], village_row[detect_lat_lon(villages)[1]]
 
@@ -140,8 +132,14 @@ So,
     lat_m, lon_m = detect_lat_lon(mandi_data)
     mandi_data = mandi_data.dropna(subset=[lat_m,lon_m])
 
-    mandi_data["distance"] = mandi_data.apply(
-        lambda r: haversine(v_lat,v_lon,r[lat_m],r[lon_m]),axis=1)
+    # distance using OSM routing
+    distances = []
+    for _, r in mandi_data.iterrows():
+        dist, _ = get_road_route(v_lat, v_lon, r[lat_m], r[lon_m])
+        distances.append(dist if dist else np.nan)
+
+    mandi_data["distance"] = distances
+    mandi_data = mandi_data.dropna(subset=["distance"])
 
     nearest = mandi_data.loc[mandi_data["distance"].idxmin()]
     base_price = nearest["today_price(rs/kg)"]
@@ -164,10 +162,15 @@ So,
         if lat is None: continue
 
         for _,row in df.iterrows():
+
             if pd.notnull(row[lat]) and pd.notnull(row[lon]):
 
-                dist = haversine(v_lat,v_lon,row[lat],row[lon])
-                transport = dist * 200 * quantity_qtl
+                dist, road_path = get_road_route(v_lat, v_lon, row[lat], row[lon])
+
+                if dist is None:
+                    continue
+
+                transport = dist * 12 * quantity_qtl
                 revenue = base_price*(1+margin_map[cat])*100*quantity_qtl
                 net = revenue - transport
 
@@ -188,41 +191,75 @@ So,
 
     df_top10["Rank"]=df_top10.index+1
 
-    # ---------------- CHARTS & TABLE SAME ----------------
+    # ---------------- BAR GRAPH ----------------
     st.subheader("📊🥭 Profit Comparison")
+
     fig = go.Figure()
     fig.add_trace(go.Bar(
         y=df_top10["Name"],
         x=df_top10["Net Profit"],
-        orientation='h'
+        orientation='h',
+        text=[f"₹{x:,.0f}" for x in df_top10["Net Profit"]],
+        textposition="outside",
+        marker=dict(
+            color=df_top10["Net Profit"],
+            colorscale="Turbo",
+            line=dict(color="black", width=1.5)
+        )
     ))
-    fig.update_layout(height=600, yaxis=dict(autorange="reversed"))
-    st.plotly_chart(fig, use_container_width=True)
 
-    st.subheader("📋 Detailed Comparison")
-    st.dataframe(df_top10)
+    fig.update_layout(height=700, yaxis=dict(autorange="reversed"))
+    st.plotly_chart(fig, width="stretch")
 
-    # ---------------- MAP FILTERED ----------------
-    st.subheader("🗺 Selected Alternatives Map")
+    # ---------------- PIE CHART ----------------
+    st.subheader("🥭 Category-wise Profit Distribution")
 
-    m = folium.Map(location=[v_lat, v_lon], zoom_start=9)
+    pie_data = df_top10.groupby("Category")["Net Profit"].sum().reset_index()
 
-    # Village
-    folium.Marker(
-        [v_lat, v_lon],
-        popup="Village",
-        icon=folium.Icon(color="black")
-    ).add_to(m)
+    pie_fig = px.pie(
+        pie_data,
+        names="Category",
+        values="Net Profit",
+        hole=0.4,
+        color_discrete_sequence=px.colors.sequential.Turbo
+    )
 
-    allowed_map_categories = ["Pickle","Pulp","Local Export","Abroad Export"]
+    pie_fig.update_traces(textinfo="percent+label")
+    st.plotly_chart(pie_fig, width="stretch")
+
+    # ---------------- TABLE ----------------
+    st.subheader("📋🥭 Detailed Comparison Table")
+
+    st.dataframe(df_top10[[
+        "Rank","Name","Category",
+        "Distance_km","Revenue",
+        "Transport Cost","Net Profit"
+    ]])
+
+    # ---------------- MAP WITH REAL ROAD ROUTES ----------------
+    st.subheader("🗺🥭 Top 10 Alternatives with Road Routes")
+
+    m = folium.Map(location=[v_lat,v_lon],zoom_start=9)
+
+    folium.Marker([v_lat,v_lon],
+                  popup="🏡 Village",
+                  icon=folium.Icon(color="black")).add_to(m)
 
     for _,row in df_top10.iterrows():
-        if row["Category"] in allowed_map_categories:
 
-            folium.Marker(
-                [row["Lat"],row["Lon"]],
-                popup=f"{row['Name']} ({row['Category']})",
-                icon=folium.Icon(color="green")
+        folium.Marker(
+            [row["Lat"],row["Lon"]],
+            popup=f"🥭 {row['Name']} ({row['Category']})",
+            icon=folium.Icon(color="green")
+        ).add_to(m)
+
+        dist, road_path = get_road_route(v_lat, v_lon, row["Lat"], row["Lon"])
+
+        if road_path:
+            folium.PolyLine(
+                road_path,
+                color="orange",
+                weight=4
             ).add_to(m)
 
-    st_folium(m, use_container_width=True, height=600)
+    st_folium(m,width=1100,height=600)
