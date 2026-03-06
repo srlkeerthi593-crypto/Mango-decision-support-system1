@@ -52,7 +52,7 @@ def detect_name(df):
             return col
     return df.columns[0]
 
-# ----------- OSM ROAD ROUTING FUNCTION (UPDATED) -----------
+# ----------- OSM ROAD ROUTING FUNCTION (USED FOR DISTANCE + ROUTE) -----------
 def get_road_route(lat1, lon1, lat2, lon2):
 
     url = f"http://router.project-osrm.org/route/v1/driving/{lon1},{lat1};{lon2},{lat2}?overview=full&geometries=geojson"
@@ -60,11 +60,12 @@ def get_road_route(lat1, lon1, lat2, lon2):
     try:
         response = requests.get(url)
         data = response.json()
-
+        
         if "routes" in data:
+
             route = data["routes"][0]
 
-            # road distance in km
+            # distance returned by OSRM (meters → km)
             distance_km = route["distance"] / 1000
 
             coordinates = route["geometry"]["coordinates"]
@@ -74,7 +75,7 @@ def get_road_route(lat1, lon1, lat2, lon2):
 
     except:
         return None, None
-
+    
     return None, None
 
 
@@ -132,10 +133,13 @@ if st.session_state.run:
     lat_m, lon_m = detect_lat_lon(mandi_data)
     mandi_data = mandi_data.dropna(subset=[lat_m,lon_m])
 
-    # distance using OSM routing
+    # ---- DISTANCE USING OSM ROUTING ----
     distances = []
-    for _, r in mandi_data.iterrows():
-        dist, _ = get_road_route(v_lat, v_lon, r[lat_m], r[lon_m])
+
+    for _,r in mandi_data.iterrows():
+
+        dist,_ = get_road_route(v_lat, v_lon, r[lat_m], r[lon_m])
+
         distances.append(dist if dist else np.nan)
 
     mandi_data["distance"] = distances
@@ -162,10 +166,9 @@ if st.session_state.run:
         if lat is None: continue
 
         for _,row in df.iterrows():
-
             if pd.notnull(row[lat]) and pd.notnull(row[lon]):
 
-                dist, road_path = get_road_route(v_lat, v_lon, row[lat], row[lon])
+                dist,_ = get_road_route(v_lat, v_lon, row[lat], row[lon])
 
                 if dist is None:
                     continue
@@ -253,7 +256,7 @@ if st.session_state.run:
             icon=folium.Icon(color="green")
         ).add_to(m)
 
-        dist, road_path = get_road_route(v_lat, v_lon, row["Lat"], row["Lon"])
+        dist,road_path = get_road_route(v_lat, v_lon, row["Lat"], row["Lon"])
 
         if road_path:
             folium.PolyLine(
