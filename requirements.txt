@@ -5,4 +5,10 @@ folium
 streamlit-folium
 plotly
 requests
+streamlit
+pandas
+osmnx
+networkx
+folium
+streamlit-folium
 
