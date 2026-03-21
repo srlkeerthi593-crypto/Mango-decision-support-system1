@@ -1,224 +1,160 @@
-# ============================================================
-# 🥭 FARMER’S MANGO PROFIT NAVIGATOR 🥭
-# Find the Best Market. Earn the Highest Return.
-# ============================================================
-
 import streamlit as st
 import pandas as pd
-import numpy as np
+import osmnx as ox
+import networkx as nx
 import folium
-import requests
 from streamlit_folium import st_folium
-import plotly.graph_objects as go
-import plotly.express as px
 
-st.set_page_config(layout="wide")
+# -------------------------------
+# PAGE CONFIG
+# -------------------------------
+st.set_page_config(page_title="Mango DSS", layout="wide")
 
-st.title("🥭 Farmer’s Mango Profit Navigator 🥭")
-st.subheader("🧭 Find the Best Market. Earn the Highest Return.")
+# -------------------------------
+# MULTILINGUAL SUPPORT
+# -------------------------------
+language = st.sidebar.selectbox("🌐 Language / भाषा", ["English", "Hindi"])
 
-# ---------------- LOAD DATA ----------------
-@st.cache_data
-def load_data():
-    villages = pd.read_csv("Village data.csv")
-    prices = pd.read_csv("cleaned_price_data.csv")
-    geo = pd.read_csv("cleaned_geo_locations.csv")
-    processing = pd.read_csv("cleaned_processing_facilities.csv")
-    pulp = pd.read_csv("Pulp_units_merged_lat_long.csv")
-    pickle_units = pd.read_csv("cleaned_pickle_units.csv")
-    local_export = pd.read_csv("cleaned_local_export.csv")
-    abroad_export = pd.read_csv("cleaned_abroad_export.csv")
-
-    for df in [villages, prices, geo, processing,
-               pulp, pickle_units, local_export, abroad_export]:
-        df.columns = df.columns.str.strip().str.lower()
-
-    return villages, prices, geo, processing, pulp, pickle_units, local_export, abroad_export
-
-villages, prices, geo, processing, pulp, pickle_units, local_export, abroad_export = load_data()
-
-# ---------------- HELPERS ----------------
-def detect_lat_lon(df):
-    lat, lon = None, None
-    for c in df.columns:
-        if "lat" in c: lat = c
-        if "lon" in c or "long" in c: lon = c
-    return lat, lon
-
-def detect_name(df):
-    priority_cols = ["market", "unit_name", "company_name", "place", "name"]
-    for col in priority_cols:
-        if col in df.columns:
-            return col
-    return df.columns[0]
-
-def haversine(lat1, lon1, lat2, lon2):
-    R = 6371
-    lat1, lon1, lat2, lon2 = map(np.radians,[lat1, lon1, lat2, lon2])
-    dlat = lat2 - lat1
-    dlon = lon2 - lon1
-    a = np.sin(dlat/2)**2 + np.cos(lat1)*np.cos(lat2)*np.sin(dlon/2)**2
-    return R * 2*np.arcsin(np.sqrt(a))
-
-# ----------- ROAD ROUTING FUNCTION -----------
-def get_road_route(lat1, lon1, lat2, lon2):
-    url = f"http://router.project-osrm.org/route/v1/driving/{lon1},{lat1};{lon2},{lat2}?overview=full&geometries=geojson"
-    
-    try:
-        response = requests.get(url)
-        data = response.json()
-        
-        if "routes" in data:
-            route = data["routes"][0]["geometry"]["coordinates"]
-            return [(coord[1], coord[0]) for coord in route]
-    except:
-        return None
-    
-    return None
-
-# ---------------- SIDEBAR ----------------
-st.sidebar.header("👨‍🌾 Farmer Details 🥭")
-
-farmer_name = st.sidebar.text_input("Farmer Name 🥭")
-
-selected_village = st.sidebar.selectbox(
-    "Select Village 🏡",
-    villages[detect_name(villages)].unique()
-)
-
-variety = st.sidebar.selectbox(
-    "Select Variety 🥭",
-    ["Banganapalli","Totapuri","Neelam","Rasalu"]
-)
-
-quantity_qtl = st.sidebar.number_input("Quantity (Quintals) 📦", min_value=1, value=10)
-
-if "run" not in st.session_state:
-    st.session_state.run = False
-
-if st.sidebar.button("🚀 Run Smart Analysis 🥭"):
-    st.session_state.run = True
-
-# ---------------- VARIETY RULES ----------------
-variety_acceptance = {
-    "Mandi":["Banganapalli","Totapuri","Neelam","Rasalu"],
-    "Processing":["Totapuri","Neelam"],
-    "Pulp":["Totapuri"],
-    "Pickle":["Totapuri","Rasalu"],
-    "Local Export":["Banganapalli"],
-    "Abroad Export":["Banganapalli"]
-}
-
-margin_map = {
-    "Mandi":0,
-    "Processing":0.03,
-    "Pulp":0.04,
-    "Pickle":0.025,
-    "Local Export":0.05,
-    "Abroad Export":0.07
-}
-
-# ---------------- MAIN ----------------
-if st.session_state.run:
-
-    st.markdown(f"## 🙏🥭 Namaste **{farmer_name}** 🥭")
-
-    village_row = villages[villages[detect_name(villages)]==selected_village].iloc[0]
-    v_lat, v_lon = village_row[detect_lat_lon(villages)[0]], village_row[detect_lat_lon(villages)[1]]
-
-    mandi_data = prices.merge(geo,on="market",how="left")
-    lat_m, lon_m = detect_lat_lon(mandi_data)
-    mandi_data = mandi_data.dropna(subset=[lat_m,lon_m])
-
-    mandi_data["distance"] = mandi_data.apply(
-        lambda r: haversine(v_lat,v_lon,r[lat_m],r[lon_m]),axis=1)
-
-    nearest = mandi_data.loc[mandi_data["distance"].idxmin()]
-    base_price = nearest["today_price(rs/kg)"]
-
-    results=[]
-
-    category_dfs = {
-        "Mandi":mandi_data,
-        "Processing":processing,
-        "Pulp":pulp,
-        "Pickle":pickle_units,
-        "Local Export":local_export,
-        "Abroad Export":abroad_export
+translations = {
+    "English": {
+        "title": "Mango Decision Support System",
+        "top3": "Top 3 Best Market Options",
+        "distance": "Distance",
+        "select_location": "Select Locations",
+        "source": "Source (Farm)",
+        "destination": "Destination (Market)",
+        "result": "Best Recommendations",
+    },
+    "Hindi": {
+        "title": "आम निर्णय समर्थन प्रणाली",
+        "top3": "शीर्ष 3 बाजार विकल्प",
+        "distance": "दूरी",
+        "select_location": "स्थान चुनें",
+        "source": "स्रोत (खेत)",
+        "destination": "गंतव्य (बाजार)",
+        "result": "सर्वश्रेष्ठ विकल्प",
     }
+}
 
-    for cat,df in category_dfs.items():
-        if variety not in variety_acceptance[cat]: continue
-        lat,lon = detect_lat_lon(df)
-        name_col = detect_name(df)
-        if lat is None: continue
+t = translations[language]
 
-        for _,row in df.iterrows():
-            if pd.notnull(row[lat]) and pd.notnull(row[lon]):
+st.title("🥭 " + t["title"])
 
-                dist = haversine(v_lat,v_lon,row[lat],row[lon])
-                transport = dist * 12 * quantity_qtl
-                revenue = base_price*(1+margin_map[cat])*100*quantity_qtl
-                net = revenue - transport
+# -------------------------------
+# SAMPLE DATA (Replace with your dataset)
+# -------------------------------
+data = {
+    "Option": ["Market A", "Market B", "Market C", "Market D"],
+    "Price": [3000, 2800, 2600, 3200],
+    "Distance": [10, 5, 3, 20]
+}
 
-                results.append({
-                    "Category":cat,
-                    "Name":row[name_col],
-                    "Distance_km":round(dist,2),
-                    "Revenue":round(revenue,2),
-                    "Transport Cost":round(transport,2),
-                    "Net Profit":round(net,2),
-                    "Lat":row[lat],
-                    "Lon":row[lon]
-                })
+df = pd.DataFrame(data)
 
-    df_top10 = pd.DataFrame(results).drop_duplicates(
-        subset=["Name","Category"]
-    ).sort_values("Net Profit",ascending=False).head(10).reset_index(drop=True)
+# SCORING FUNCTION (customizable)
+df["Score"] = df["Price"] / df["Distance"]
 
-    df_top10["Rank"]=df_top10.index+1
+# -------------------------------
+# TOP 3 FUNCTION
+# -------------------------------
+def get_top_3_alternatives(df):
+    df_sorted = df.sort_values(by="Score", ascending=False).head(3)
 
-    # ---------------- MAP WITH PROFIT HIGHLIGHT ----------------
-    st.subheader("🗺🥭 Top 10 Alternatives with Road Routes")
+    colors = ["#2ecc71", "#f39c12", "#e74c3c"]
 
-    m = folium.Map(location=[v_lat,v_lon],zoom_start=9)
+    results = []
+    for i, (_, row) in enumerate(df_sorted.iterrows()):
+        results.append({
+            "name": row["Option"],
+            "score": round(row["Score"], 2),
+            "color": colors[i],
+            "rank": i + 1,
+            "price": row["Price"],
+            "distance": row["Distance"]
+        })
+    return results
 
-    folium.Marker(
-        [v_lat,v_lon],
-        popup="🏡 Village",
-        icon=folium.Icon(color="black")
-    ).add_to(m)
+# -------------------------------
+# EXPLANATION FUNCTION
+# -------------------------------
+def explain_option(option):
+    explanations = {
+        "Market A": "High price but moderate distance",
+        "Market B": "Balanced option with good profit",
+        "Market C": "Closest market with quick selling",
+        "Market D": "Very high price but far distance"
+    }
+    return explanations.get(option, "")
 
-    for _,row in df_top10.iterrows():
+# -------------------------------
+# ROUTE FUNCTION (OSM)
+# -------------------------------
+@st.cache_resource
+def get_route(lat1, lon1, lat2, lon2):
+    G = ox.graph_from_point((lat1, lon1), dist=10000, network_type='drive')
 
-        # Crown icon for best profit
-        if row["Rank"] == 1:
-            marker_icon = folium.Icon(color="red", icon="star")
-        else:
-            marker_icon = folium.Icon(color="green")
+    orig = ox.distance.nearest_nodes(G, lon1, lat1)
+    dest = ox.distance.nearest_nodes(G, lon2, lat2)
 
-        folium.Marker(
-            [row["Lat"],row["Lon"]],
-            popup=f"🥭 {row['Name']} ({row['Category']}) | 🏆 Rank {row['Rank']}",
-            icon=marker_icon
-        ).add_to(m)
+    route = nx.shortest_path(G, orig, dest, weight='length')
+    distance = nx.shortest_path_length(G, orig, dest, weight='length')
 
-        road_path = get_road_route(v_lat, v_lon, row["Lat"], row["Lon"])
+    return G, route, distance
 
-        if road_path:
+def show_map(G, route):
+    return ox.plot_route_folium(G, route)
 
-            # Highlight most profitable route
-            if row["Rank"] == 1:
-                route_color = "darkred"
-                route_weight = 7
-            else:
-                route_color = "orange"
-                route_weight = 4
+# -------------------------------
+# LOCATION INPUT
+# -------------------------------
+st.sidebar.header(t["select_location"])
 
-            folium.PolyLine(
-                road_path,
-                color=route_color,
-                weight=route_weight
-            ).add_to(m)
+lat1 = st.sidebar.number_input("Farm Latitude", value=30.3165)
+lon1 = st.sidebar.number_input("Farm Longitude", value=78.0322)
 
-    st_folium(m,width=1100,height=600)
+lat2 = st.sidebar.number_input("Market Latitude", value=30.0668)
+lon2 = st.sidebar.number_input("Market Longitude", value=79.0193)
+
+# -------------------------------
+# DISPLAY TOP 3
+# -------------------------------
+st.subheader("🌱 " + t["top3"])
+
+top3 = get_top_3_alternatives(df)
+
+for item in top3:
+    st.markdown(
+        f"""
+        <div style="background-color:{item['color']}; padding:15px; border-radius:10px; margin-bottom:10px;">
+            <h3 style="color:white;">Rank {item['rank']} - {item['name']}</h3>
+            <p style="color:white;">💰 Price: ₹{item['price']}</p>
+            <p style="color:white;">📍 Distance: {item['distance']} km</p>
+            <p style="color:white;">⭐ Score: {item['score']}</p>
+            <p style="color:white;">📌 {explain_option(item['name'])}</p>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
+# -------------------------------
+# MAP + ROUTE
+# -------------------------------
+st.subheader("🗺️ Route & Distance")
+
+if st.button("Show Route"):
+    try:
+        G, route, dist = get_route(lat1, lon1, lat2, lon2)
+
+        st.success(f"🚜 {t['distance']}: {round(dist/1000, 2)} km")
+
+        route_map = show_map(G, route)
+        st_folium(route_map, width=900)
+
+    except Exception as e:
+        st.error("Error loading map. Try nearby locations.")
+
+# -------------------------------
+# FOOTER
+# -------------------------------
+st.markdown("---")
+st.markdown("🚜 Built for Farmers | Smart Agriculture DSS")
