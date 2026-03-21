@@ -1,5 +1,6 @@
 # ============================================================
-# 🥭 FARMER PROFIT INTELLIGENCE SYSTEM (FAST + DASHBOARD UI)
+# 🥭 FARMER PROFIT INTELLIGENCE SYSTEM 🥭
+# Smart Mango Marketing Decision Engine
 # ============================================================
 
 import streamlit as st
@@ -8,15 +9,61 @@ import numpy as np
 import folium
 import requests
 from streamlit_folium import st_folium
+import plotly.graph_objects as go
 import plotly.express as px
 
 st.set_page_config(layout="wide")
 
-# ---------------- HEADER ----------------
+# ---------------- HEADER IMAGE ----------------
 st.markdown("""
-<h1 style='text-align:center;'>🥭 Farmer Profit Intelligence System</h1>
-<p style='text-align:center;'>Smart Mango Marketing Decision Engine</p>
+<style>
+.header {
+    background-image: url('mango farm1.jpg');
+    background-size: cover;
+    padding: 60px;
+    border-radius: 12px;
+    text-align: center;
+    color: white;
+}
+.metric-box {
+    background-color: #f2f2f2;
+    padding: 15px;
+    border-radius: 10px;
+    text-align:center;
+}
+</style>
 """, unsafe_allow_html=True)
+
+st.markdown("""
+<div class="header">
+    <h1>🥭 Farmer Profit Intelligence System</h1>
+    <h3>Smart Mango Marketing Decision Engine</h3>
+</div>
+""", unsafe_allow_html=True)
+
+# ---------------- MULTILINGUAL ----------------
+language = st.sidebar.selectbox("🌐 Language", ["English", "తెలుగు", "हिंदी"])
+
+text = {
+    "English": {
+        "farmer": "Farmer Name",
+        "village": "Select Village",
+        "variety": "Select Mango Variety",
+        "run": "Run Smart Analysis",
+    },
+    "తెలుగు": {
+        "farmer": "రైతు పేరు",
+        "village": "గ్రామం ఎంచుకోండి",
+        "variety": "మామిడి రకం ఎంచుకోండి",
+        "run": "విశ్లేషణ ప్రారంభించండి",
+    },
+    "हिंदी": {
+        "farmer": "किसान का नाम",
+        "village": "गांव चुनें",
+        "variety": "आम की किस्म चुनें",
+        "run": "विश्लेषण चलाएं",
+    }
+}
 
 # ---------------- LOAD DATA ----------------
 @st.cache_data
@@ -24,136 +71,211 @@ def load_data():
     villages = pd.read_csv("Village data.csv")
     prices = pd.read_csv("cleaned_price_data.csv")
     geo = pd.read_csv("cleaned_geo_locations.csv")
+    processing = pd.read_csv("cleaned_processing_facilities.csv")
+    pulp = pd.read_csv("Pulp_units_merged_lat_long.csv")
+    pickle_units = pd.read_csv("cleaned_pickle_units.csv")
+    local_export = pd.read_csv("cleaned_local_export.csv")
+    abroad_export = pd.read_csv("cleaned_abroad_export.csv")
 
-    for df in [villages, prices, geo]:
+    for df in [villages, prices, geo, processing,
+               pulp, pickle_units, local_export, abroad_export]:
         df.columns = df.columns.str.strip().str.lower()
 
-    return villages, prices, geo
+    return villages, prices, geo, processing, pulp, pickle_units, local_export, abroad_export
 
-villages, prices, geo = load_data()
+villages, prices, geo, processing, pulp, pickle_units, local_export, abroad_export = load_data()
 
 # ---------------- HELPERS ----------------
 def detect_lat_lon(df):
     lat, lon = None, None
     for c in df.columns:
         if "lat" in c: lat = c
-        if "lon" in c: lon = c
+        if "lon" in c or "long" in c: lon = c
     return lat, lon
 
 def detect_name(df):
-    for col in ["name","place","market"]:
+    priority_cols = ["market", "unit_name", "company_name", "place", "name"]
+    for col in priority_cols:
         if col in df.columns:
             return col
     return df.columns[0]
 
-def fast_dist(lat1, lon1, lat2, lon2):
-    return np.sqrt((lat1-lat2)**2 + (lon1-lon2)**2)
+def haversine(lat1, lon1, lat2, lon2):
+    R = 6371
+    lat1, lon1, lat2, lon2 = map(np.radians,[lat1, lon1, lat2, lon2])
+    dlat = lat2 - lat1
+    dlon = lon2 - lon1
+    a = np.sin(dlat/2)**2 + np.cos(lat1)*np.cos(lat2)*np.sin(dlon/2)**2
+    return R * 2*np.arcsin(np.sqrt(a))
 
-def get_route(lat1, lon1, lat2, lon2):
+def get_road_route(lat1, lon1, lat2, lon2):
     url = f"http://router.project-osrm.org/route/v1/driving/{lon1},{lat1};{lon2},{lat2}?overview=full&geometries=geojson"
     try:
-        r = requests.get(url).json()
-        dist = r["routes"][0]["distance"]/1000
-        route = r["routes"][0]["geometry"]["coordinates"]
-        route = [(c[1],c[0]) for c in route]
-        return route, dist
+        response = requests.get(url)
+        data = response.json()
+        if "routes" in data:
+            route = data["routes"][0]["geometry"]["coordinates"]
+            return [(coord[1], coord[0]) for coord in route]
     except:
-        return None, None
+        return None
+    return None
 
 # ---------------- SIDEBAR ----------------
-st.sidebar.header("📊 Analysis Control Panel")
+st.sidebar.header("👨‍🌾 Farmer Details")
 
-farmer_name = st.sidebar.text_input("Enter Farmer Name")
-village_name = st.sidebar.selectbox("Enter Village Name",
-                                   sorted(villages[detect_name(villages)].unique()))
+farmer_name = st.sidebar.text_input(text[language]["farmer"])
 
-variety = st.sidebar.selectbox("Select Mango Variety",
-                              ["Banganapalli","Totapuri","Neelam","Rasalu"])
+selected_village = st.sidebar.selectbox(
+    text[language]["village"],
+    villages[detect_name(villages)].unique()
+)
 
-run = st.sidebar.button("Run Smart Analysis")
+variety = st.sidebar.selectbox(
+    text[language]["variety"],
+    ["Banganapalli","Totapuri","Neelam","Rasalu"]
+)
+
+quantity_qtl = st.sidebar.number_input("Quantity (Quintals)", min_value=1, value=10)
+
+run = st.sidebar.button(text[language]["run"])
+
+# ---------------- VARIETY RULES ----------------
+variety_acceptance = {
+    "Mandi":["Banganapalli","Totapuri","Neelam","Rasalu"],
+    "Processing":["Totapuri","Neelam"],
+    "Pulp":["Totapuri"],
+    "Pickle":["Totapuri","Rasalu"],
+    "Local Export":["Banganapalli"],
+    "Abroad Export":["Banganapalli"]
+}
+
+margin_map = {
+    "Mandi":0,
+    "Processing":0.03,
+    "Pulp":0.04,
+    "Pickle":0.025,
+    "Local Export":0.05,
+    "Abroad Export":0.07
+}
 
 # ---------------- MAIN ----------------
 if run:
 
-    st.success(f"🙏 Namaste {farmer_name}")
+    with st.spinner("Calculating best market for you..."):
 
-    v_row = villages[villages[detect_name(villages)]==village_name].iloc[0]
-    lat_v, lon_v = v_row[detect_lat_lon(villages)[0]], v_row[detect_lat_lon(villages)[1]]
+        st.markdown(f"## 🙏 Namaste {farmer_name}")
 
-    data = prices.merge(geo, on="market", how="left")
-    lat_m, lon_m = detect_lat_lon(data)
+        village_row = villages[villages[detect_name(villages)]==selected_village].iloc[0]
+        v_lat, v_lon = village_row[detect_lat_lon(villages)[0]], village_row[detect_lat_lon(villages)[1]]
 
-    # FAST FILTER
-    data["fast_dist"] = data.apply(
-        lambda r: fast_dist(lat_v, lon_v, r[lat_m], r[lon_m]), axis=1
-    )
+        mandi_data = prices.merge(geo,on="market",how="left")
+        lat_m, lon_m = detect_lat_lon(mandi_data)
+        mandi_data = mandi_data.dropna(subset=[lat_m,lon_m])
 
-    data = data.sort_values("fast_dist").head(10)
+        mandi_data["distance"] = mandi_data.apply(
+            lambda r: haversine(v_lat,v_lon,r[lat_m],r[lon_m]),axis=1)
 
-    results = []
+        nearest = mandi_data.loc[mandi_data["distance"].idxmin()]
+        base_price = nearest["today_price(rs/kg)"]
 
-    for _, row in data.iterrows():
-        price = row["today_price(rs/kg)"]
+        # PRICE POPUP
+        st.success(f"💰 Today's Price: ₹{base_price} per kg")
 
-        dist = row["fast_dist"] * 111  # approx km
+        results=[]
 
-        revenue = price * 100 * 10
-        transport = dist * 12 * 10
-        net = revenue - transport
+        category_dfs = {
+            "Mandi":mandi_data,
+            "Processing":processing,
+            "Pulp":pulp,
+            "Pickle":pickle_units,
+            "Local Export":local_export,
+            "Abroad Export":abroad_export
+        }
 
-        results.append({
-            "Name": row["market"],
-            "Distance": round(dist,2),
-            "Net": round(net,2),
-            "Price": price,
-            "Lat": row[lat_m],
-            "Lon": row[lon_m]
-        })
+        for cat,df in category_dfs.items():
+            if variety not in variety_acceptance[cat]: continue
+            lat,lon = detect_lat_lon(df)
+            name_col = detect_name(df)
+            if lat is None: continue
 
-    df = pd.DataFrame(results).sort_values("Net", ascending=False)
+            for _,row in df.iterrows():
+                if pd.notnull(row[lat]) and pd.notnull(row[lon]):
 
-    best = df.iloc[0]
+                    dist = haversine(v_lat,v_lon,row[lat],row[lon])
+                    transport = dist * 12 * quantity_qtl
+                    revenue = base_price*(1+margin_map[cat])*100*quantity_qtl
+                    net = revenue - transport
 
-    # ---------------- METRICS ----------------
-    col1, col2, col3, col4 = st.columns(4)
+                    results.append({
+                        "Category":cat,
+                        "Name":row[name_col],
+                        "Distance_km":round(dist,2),
+                        "Revenue":round(revenue,2),
+                        "Transport Cost":round(transport,2),
+                        "Net Profit":round(net,2),
+                        "Lat":row[lat],
+                        "Lon":row[lon]
+                    })
 
-    col1.metric("Base Price (₹/kg)", f"{best['Price']}")
-    col2.metric("Total Revenue (₹)", f"{int(best['Price']*100*10):,}")
-    col3.metric("Best Location", best["Name"])
-    col4.metric("Best Profit (₹)", f"{int(best['Net']):,}")
+        df_top10 = pd.DataFrame(results).sort_values("Net Profit",ascending=False).head(10).reset_index(drop=True)
 
-    # ---------------- BAR CHART ----------------
-    st.subheader("📊 Profit Comparison")
+        # ---------------- TOP CARDS ----------------
+        col1, col2, col3, col4 = st.columns(4)
 
-    fig = px.bar(df.head(10), x="Name", y="Net", color="Net")
-    st.plotly_chart(fig, use_container_width=True)
+        col1.metric("Base Price (₹/kg)", int(base_price))
+        col2.metric("Total Revenue (₹)", int(df_top10["Revenue"].max()))
+        col3.metric("Best Market", df_top10.iloc[0]["Name"])
+        col4.metric("Best Profit (₹)", int(df_top10.iloc[0]["Net Profit"]))
 
-    # ---------------- TABLE ----------------
-    st.subheader("📋 Top Locations")
+        # ---------------- BAR GRAPH ----------------
+        st.subheader("📊 Profit Comparison")
 
-    st.dataframe(df.head(10)[["Name","Distance","Net"]])
+        colors = px.colors.qualitative.Set2
 
-    # ---------------- MAP (ONLY TOP 3 REAL ROUTES) ----------------
-    st.subheader("🗺️ Market Map")
+        fig = go.Figure()
 
-    m = folium.Map(location=[lat_v, lon_v], zoom_start=9)
+        for i in range(len(df_top10)):
+            fig.add_trace(go.Bar(
+                y=[df_top10["Name"][i]],
+                x=[df_top10["Net Profit"][i]],
+                orientation='h',
+                marker_color=colors[i % len(colors)],
+                name=df_top10["Category"][i]
+            ))
 
-    folium.Marker([lat_v, lon_v], popup="Village",
-                  icon=folium.Icon(color="black")).add_to(m)
+        fig.update_layout(height=600, showlegend=True)
+        st.plotly_chart(fig, use_container_width=True)
 
-    top3 = df.head(3)
+        # ---------------- TABLE ----------------
+        st.subheader("📋 Top 10 Closest Markets")
 
-    colors = ["green","orange","red"]
+        st.dataframe(df_top10[[
+            "Name","Distance_km","Net Profit"
+        ]])
 
-    for i, row in top3.iterrows():
+        # ---------------- MAP ----------------
+        st.subheader("🗺 Market Location Map")
 
-        folium.Marker([row["Lat"], row["Lon"]],
-                      popup=row["Name"],
-                      icon=folium.Icon(color=colors[i])).add_to(m)
+        m = folium.Map(location=[v_lat,v_lon],zoom_start=9)
 
-        route, _ = get_route(lat_v, lon_v, row["Lat"], row["Lon"])
+        folium.Marker([v_lat,v_lon],popup="Village",
+                      icon=folium.Icon(color="black")).add_to(m)
 
-        if route:
-            folium.PolyLine(route, color=colors[i], weight=5).add_to(m)
+        color_map = {
+            "Mandi":"green","Processing":"blue","Pulp":"purple",
+            "Pickle":"orange","Local Export":"red","Abroad Export":"darkred"
+        }
 
-    st_folium(m, width=1100, height=500)
+        for _,row in df_top10.iterrows():
+
+            folium.Marker(
+                [row["Lat"],row["Lon"]],
+                popup=row["Name"],
+                icon=folium.Icon(color=color_map.get(row["Category"],"green"))
+            ).add_to(m)
+
+            road = get_road_route(v_lat, v_lon, row["Lat"], row["Lon"])
+            if road:
+                folium.PolyLine(road,color="orange",weight=4).add_to(m)
+
+        st_folium(m,width=1100,height=500)
